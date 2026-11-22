@@ -60,7 +60,8 @@ def normalized_text(text: str) -> str:
     for value in re.findall(r"[A-Za-z0-9+/]{16,}(?:={0,2})", text):
         value = value.rstrip("=")
         try:
-            decoded = base64.b64decode(value, validate=True).decode("utf-8", "ignore")
+            padded = value + "=" * ((-len(value)) % 4)
+            decoded = base64.b64decode(padded, validate=True).decode("utf-8", "ignore")
         except (binascii.Error, UnicodeDecodeError):
             continue
         if decoded:

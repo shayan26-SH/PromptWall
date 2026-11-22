@@ -51,7 +51,9 @@ public final class PromptWallServer {
 
     private void route(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        if ("GET".equals(exchange.getRequestMethod()) && "/health".equals(path)) {
+        if ("GET".equals(exchange.getRequestMethod()) && ("/".equals(path) || "/app".equals(path))) {
+            sendDashboard(exchange);
+        } else if ("GET".equals(exchange.getRequestMethod()) && "/health".equals(path)) {
             sendJson(exchange, 200, "{\"status\":\"ok\",\"service\":\"promptwall-java\"}");
         } else if ("GET".equals(exchange.getRequestMethod()) && "/dashboard".equals(path)) {
             sendDashboard(exchange);
@@ -125,6 +127,23 @@ public final class PromptWallServer {
     }
 
     private boolean allowRequest(String clientKey) {
+        try {
+            String payload = "{\"client\":\"" + clientKey.replace("\"", "\\\"")
+                + "\",\"limit\":" + rateLimitRequests
+                + ",\"window_seconds\":" + (rateLimitWindowMillis / 1000L) + "}";
+            HttpResponse<String> response = HTTP.send(
+                HttpRequest.newBuilder(URI.create(securityUrl + "/rate-limit/check"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(payload))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString()
+            );
+            if (response.statusCode() < 400) {
+                return response.body().contains("\"allowed\":true");
+            }
+        } catch (IOException | InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
         long now = System.currentTimeMillis();
         Deque<Long> timestamps = REQUESTS.computeIfAbsent(clientKey, ignored -> new ArrayDeque<>());
         synchronized (timestamps) {
@@ -182,10 +201,13 @@ public final class PromptWallServer {
 
     private void sendDashboard(HttpExchange exchange) throws IOException {
         String html = """
-            <!doctype html><html><head><title>PromptWall Dashboard</title>
-            <style>body{font-family:Arial;margin:40px;background:#0f172a;color:#e2e8f0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #334155;padding:10px;text-align:left}th{background:#1e293b}h1{color:#67e8f9}</style></head>
-            <body><h1>PromptWall Audit Dashboard</h1><table><thead><tr><th>Time</th><th>Client</th><th>Event</th><th>Result</th></tr></thead><tbody id="rows"></tbody></table>
-            <script>fetch('/v1/audit/logs').then(r=>r.json()).then(items=>{document.getElementById('rows').innerHTML=items.slice().reverse().map(x=>`<tr><td>${x.timestamp}</td><td>${x.client}</td><td>${x.event}</td><td>${x.result}</td></tr>`).join('')||'<tr><td colspan="4">No audit events yet</td></tr>'})</script></body></html>
+            <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>PromptWall Demo</title>
+            <style>:root{color-scheme:dark}body{font-family:Arial;margin:0;background:#08111f;color:#e2e8f0}.wrap{max-width:1100px;margin:auto;padding:28px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}section{background:#111827;border:1px solid #263449;border-radius:12px;padding:18px}textarea{width:100%;min-height:150px;box-sizing:border-box;background:#0b1220;color:white;border:1px solid #334155;border-radius:8px;padding:12px}button{background:#06b6d4;border:0;border-radius:8px;padding:10px 16px;color:#06202a;font-weight:bold;cursor:pointer}pre{white-space:pre-wrap;background:#0b1220;padding:12px;border-radius:8px;min-height:100px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #334155;padding:8px;text-align:left}th{background:#1e293b}h1{color:#67e8f9}@media(max-width:800px){.grid{grid-template-columns:1fr}}</style></head>
+            <body><div class="wrap"><h1>PromptWall Demo</h1><div class="grid"><section><h2>Chat test</h2><textarea id="prompt" placeholder="Enter a prompt..."></textarea><p><button onclick="sendPrompt()">Send through proxy</button></p><pre id="response">Response will appear here</pre></section><section><h2>Audit log</h2><table><thead><tr><th>Time</th><th>Event</th><th>Result</th></tr></thead><tbody id="rows"></tbody></table></section></div></div>
+            <script>
+            async function sendPrompt(){const prompt=document.getElementById('prompt').value;document.getElementById('response').textContent='Waiting...';try{const r=await fetch('/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'demo',messages:[{role:'user',content:prompt}]})});const text=await r.text();document.getElementById('response').textContent=r.status+'\\n'+text;loadLogs()}catch(e){document.getElementById('response').textContent=e}}
+            async function loadLogs(){const items=await(await fetch('/v1/audit/logs')).json();document.getElementById('rows').innerHTML=items.slice().reverse().map(x=>`<tr><td>${x.timestamp}</td><td>${x.event}</td><td>${x.result}</td></tr>`).join('')||'<tr><td colspan="3">No audit events yet</td></tr>'}loadLogs();
+            </script></body></html>
             """;
         sendResponse(exchange, 200, "text/html; charset=utf-8", html);
     }
