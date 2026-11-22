@@ -3,7 +3,7 @@
 
 PromptWall is a drop-in middleware reverse proxy that sits between client applications and Large Language Model (LLM) APIs (OpenAI, Anthropic, local models). It inspects incoming user prompts in real time to block prompt injections and jailbreaks, while scrubbing outgoing AI responses to prevent accidental leaks of Personally Identifiable Information (PII) and API secrets.
 
-**Repository description:** Drop-in security layer for LLM applications: prompt-injection shield, PII redaction, and rate limiting
+
 
 ---
 
